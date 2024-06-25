@@ -102,6 +102,7 @@ function WebTourCreator() {
   const { mutateAsync } = useSaveTour();
   const tour = data?.data as Tour;
   const debounceHighlightElementRef = useRef<NodeJS.Timeout | null>(null);
+  const credentialsRef = useRef<Record<string, any> | null>(null);
 
   const saveChanges = async () => {
     if (selectedStep) {
@@ -182,12 +183,35 @@ function WebTourCreator() {
           { type: 'handshake', parentUrl: window.location.origin },
           '*',
         );
+        if (credentialsRef.current) {
+          iframeElementRef.current?.contentWindow?.postMessage(
+            { type: 'credentials-from-editor', credentials: credentialsRef.current },
+            '*',
+          );
+          credentialsRef.current = null;
+        }
       }
       if (e.data.type === 'ready-for-touring') {
         setIsSettingUpFinished(true);
       }
+      if (e.data.type === 'credentials-from-popup') {
+        credentialsRef.current = e.data.credentials;
+      }
     });
   }, []);
+
+  useEffect(() => {
+    if (tour?.url) {
+      const url = new URL(tour.url);
+      url.searchParams.append('tour_editor_action', 'GET_CREDENTIALS_ACTION');
+
+      window.open(
+        url.toString(),
+        'cognitoWindowIfAny',
+        'location,toolbar,resizable,scrollbars,status,width=600,height=600',
+      );
+    }
+  }, [tour]);
 
   const renderPanel = () => {
     if (!selectedStep && tour) {
@@ -284,7 +308,21 @@ const TourPanel = (props: TourPanelProps) => {
 };
 
 const StepDetailPanel = (props: StepDetailPanelProps) => {
-  const { step, onStepChange, saveChanges } = props;
+  const { step, onStepChange, saveChanges, iframeElement } = props;
+
+  const handlePreviewElement = () => {
+    iframeElement.contentWindow?.postMessage(
+      {
+        type: 'highlight element',
+        step,
+      },
+      '*',
+    );
+  };
+
+  const handleCleanUp = () => {
+    iframeElement.contentWindow?.postMessage({ type: 'clean up' }, '*');
+  };
 
   return (
     <div className='py-4 flex flex-col justify-between min-h-screen gap-10'>
@@ -309,6 +347,7 @@ const StepDetailPanel = (props: StepDetailPanelProps) => {
             })}
             value={step.popover.type}
             onSelect={(value) => {
+              handleCleanUp();
               onStepChange({
                 ...step,
                 element: value === 'modal' ? null : step.element,
@@ -348,9 +387,16 @@ const StepDetailPanel = (props: StepDetailPanelProps) => {
           />
         </div>
       </div>
-      <div className='flex flex-col items-center gap-6'>
+      <div className='flex flex-col items-center gap-4 px-2 mt-4'>
         <Button
-          className='w-full mt-4'
+          onClick={handlePreviewElement}
+          _type='secondary'
+          className='w-full'
+        >
+          Highlight Selected Element
+        </Button>
+        <Button
+          className='w-full'
           onClick={saveChanges}
         >
           Save Changes
@@ -406,16 +452,6 @@ const ElementSelectorSection = (props: StepDetailPanelProps) => {
     iframeElement.contentWindow?.postMessage({ type: 'end getting element' }, '*');
   };
 
-  const handlePreviewElement = () => {
-    iframeElement.contentWindow?.postMessage(
-      {
-        type: 'highlight element',
-        step,
-      },
-      '*',
-    );
-  };
-
   return (
     <div className='flex flex-col gap-6'>
       <Input
@@ -436,13 +472,6 @@ const ElementSelectorSection = (props: StepDetailPanelProps) => {
       >
         Select Element
       </Button>
-      <Button
-        onClick={handlePreviewElement}
-        _type='secondary'
-        className='w-full'
-      >
-        Highlight Selected Element
-      </Button>
     </div>
   );
 };
@@ -456,16 +485,6 @@ const UIContentSection = ({ step, onStepChange, iframeElement }: StepDetailPanel
         [key]: value || null,
       },
     });
-  };
-
-  const handlePreviewElement = () => {
-    iframeElement.contentWindow?.postMessage(
-      {
-        type: 'highlight element',
-        step,
-      },
-      '*',
-    );
   };
 
   return (
@@ -483,12 +502,14 @@ const UIContentSection = ({ step, onStepChange, iframeElement }: StepDetailPanel
         value={step.popover.description}
         onChange={handlePopoverConfigChange('description')}
       />
-      <Input
-        label='Detail Link'
-        placeholder='Enter popover detail link'
-        value={step.popover.detailLink}
-        onChange={handlePopoverConfigChange('detailLink')}
-      />
+      {step.popover.type !== 'modal' && (
+        <Input
+          label='Detail Link'
+          placeholder='Enter popover detail link'
+          value={step.popover.detailLink}
+          onChange={handlePopoverConfigChange('detailLink')}
+        />
+      )}
       <Input
         label='Video Link'
         placeholder='Enter popover video link'
@@ -507,16 +528,6 @@ const UIContentSection = ({ step, onStepChange, iframeElement }: StepDetailPanel
             { label: 'Input', value: 'input' },
           ]}
         />
-      )}
-
-      {step.popover.type === 'modal' && (
-        <Button
-          onClick={handlePreviewElement}
-          _type='secondary'
-          className='w-full'
-        >
-          Highlight Modal
-        </Button>
       )}
     </div>
   );
